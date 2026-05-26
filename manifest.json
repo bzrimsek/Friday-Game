@@ -1,6 +1,6 @@
 {
   "name": "Friday Game",
-  "short_name": "Friday Game",
+  "short_name": "Fri Game",
   "description": "Golf scoring and group management for Friday games",
   "start_url": "./index.html",
   "display": "standalone",
@@ -9,14 +9,16 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "logo.jpg",
+      "src": "logo-192.png",
       "sizes": "192x192",
-      "type": "image/jpeg"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
-      "src": "logo.jpg",
+      "src": "logo-512.png",
       "sizes": "512x512",
-      "type": "image/jpeg"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ]
 }
