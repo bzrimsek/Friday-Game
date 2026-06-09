@@ -1,0 +1,410 @@
+<!--
+CHANGELOG
+v1.0  2026-06-09  Initial Friday Game self-service RSVP page.
+  Add:  Player select from session roster.
+  Add:  In / Out only (no Maybe).
+  Add:  If In — earliest tee time picker from session tee times.
+  Add:  If Out — sub picker (non-regulars) + optional guest name field.
+  Add:  Phone capture if not on file.
+  Add:  HCP + GHIN update fields.
+  Add:  Expiry at 5pm on game day.
+  Add:  Read-modify-write PUT (writeKey rides in payload).
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' https://extras-manager-default-rtdb.firebaseio.com https://fonts.googleapis.com https://fonts.gstatic.com; img-src 'self' data:;">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>Friday Game — RSVP</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#1a2f1a;min-height:100vh;display:flex;align-items:center;justify-content:center;font-family:'DM Sans',sans-serif;padding:20px}
+  .card-wrap{position:relative;max-width:420px;width:100%;display:flex;flex-direction:column;align-items:center;}
+  .card{background:#f4f4f2;border-radius:16px;padding:28px 24px;width:100%;position:relative;}
+  .logo{font-family:'Bebas Neue',sans-serif;font-size:24px;color:#1a2f1a;letter-spacing:2px;margin-bottom:2px}
+  .subtitle{font-size:13px;color:#4a6741;margin-bottom:18px}
+  .date-badge{background:#1a2f1a;color:#c9a227;font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:1px;padding:6px 14px;border-radius:20px;display:inline-block;margin-bottom:20px}
+  label{font-size:12px;font-weight:600;color:#4a6741;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px}
+  select,input[type=number],input[type=text],input[type=tel]{width:100%;padding:12px 14px;border-radius:10px;border:1.5px solid #ccc;font-size:15px;font-family:'DM Sans',sans-serif;color:#1a2f1a;background:#fff;margin-bottom:16px;appearance:none}
+  select:focus,input:focus{outline:none;border-color:#c9a227}
+  .btn-row{display:flex;gap:10px;margin-bottom:16px}
+  .btn{flex:1;padding:14px;border-radius:10px;border:2px solid #ccc;font-size:16px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;background:#fff;color:#1a2f1a}
+  .btn-in:active,.btn-out:active{opacity:.7;transform:scale(.97)}
+  .selected-in {background:#166534;color:#fff;border:2px solid #166534;box-shadow:0 0 0 3px rgba(22,101,52,.2);transform:scale(1.04)}
+  .selected-out{background:#b91c1c;color:#fff;border:2px solid #b91c1c;box-shadow:0 0 0 3px rgba(185,28,28,.2);transform:scale(1.04)}
+  .btn-save{width:100%;padding:16px;border-radius:12px;border:none;background:#c9a227;color:#1a2f1a;font-size:17px;font-weight:800;cursor:pointer;font-family:'DM Sans',sans-serif;box-shadow:0 2px 8px rgba(201,162,39,.4);margin-top:4px}
+  .btn-save:active{opacity:.8;transform:scale(.98)}
+  .btn-save:disabled{opacity:.5;cursor:not-allowed}
+  .section-box{background:#f0f0ee;border-radius:10px;padding:14px;margin-bottom:16px}
+  .section-title{font-size:12px;font-weight:700;color:#4a6741;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+  .hint{font-size:11px;color:#888;margin-top:-10px;margin-bottom:14px;line-height:1.4}
+  .nudge{background:#78350f;border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:12px;color:#fcd34d;line-height:1.4;display:none}
+  .status-indicator{text-align:center;font-size:13px;font-weight:600;min-height:20px;margin-bottom:12px}
+  .expired{text-align:center;padding:16px 0}
+  .expired-icon{font-size:48px;margin-bottom:12px}
+  .expired-title{font-family:'Bebas Neue',sans-serif;font-size:24px;color:#1a2f1a;letter-spacing:1px;margin-bottom:6px}
+  .expired-msg{font-size:13px;color:#4a6741;line-height:1.5}
+  .success{text-align:center;padding:10px 0}
+  .success-icon{font-size:40px;margin-bottom:8px}
+  .success-msg{font-family:'Bebas Neue',sans-serif;font-size:22px;color:#1a2f1a;letter-spacing:1px}
+  .success-sub{font-size:13px;color:#4a6741;margin-top:6px;line-height:1.5}
+  .loading{text-align:center;padding:20px 0;color:#4a6741;font-size:14px}
+  .close-btn{position:absolute;top:-12px;right:-12px;width:30px;height:30px;border-radius:50%;background:#c9a227;border:none;color:#1a2f1a;font-size:16px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10}
+  .err-msg{color:#b91c1c;font-size:13px;text-align:center;margin-top:10px;display:none}
+  .ver{text-align:center;font-size:10px;color:#bbb;margin-top:16px}
+</style>
+</head>
+<body>
+<div class="card-wrap">
+  <div style="position:relative;width:100%;">
+    <div class="card" id="card">
+      <div class="loading">Loading…</div>
+    </div>
+    <button class="close-btn" onclick="history.length>1?history.back():window.close()" title="Close">✕</button>
+  </div>
+</div>
+
+<script>
+const FB_BASE      = 'https://extras-manager-default-rtdb.firebaseio.com/friday-game';
+const RSVP_VERSION = '1.0';
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+async function fetchWT(url, options={}, ms=10000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try { const r = await fetch(url, {...options, signal:ctrl.signal}); clearTimeout(t); return r; }
+  catch(e) { clearTimeout(t); throw e; }
+}
+
+// URL params
+const params  = new URLSearchParams(location.search);
+const sessionId = params.get('s') || '';
+const dateStr   = params.get('d') || ''; // YYYY-MM-DD
+
+// Expiry — 5pm on game day
+function isExpired() {
+  if (!dateStr) return false;
+  const [y,m,d] = dateStr.split('-').map(Number);
+  return new Date() > new Date(y, m-1, d, 17, 0, 0);
+}
+
+function fmtDate(d) {
+  if (!d) return '';
+  return new Date(d+'T12:00:00').toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+}
+
+function encodePhone(digits) { try { return btoa(digits); } catch(e) { return digits; } }
+function decodePhone(s) { if (!s) return ''; try { const d=atob(s); return /^[0-9]+$/.test(d)?d:s; } catch(e) { return s; } }
+
+let fullState = null;
+let session   = null;
+let players   = [];   // regulars (can RSVP)
+let subs      = [];   // non-regulars (can be picked as sub)
+let selectedStatus = null;
+let selectedEarliest = null;
+
+async function init() {
+  const card = document.getElementById('card');
+
+  if (isExpired()) {
+    card.innerHTML = expiredHTML(); return;
+  }
+
+  try {
+    const resp = await fetchWT(`${FB_BASE}/state.json`);
+    if (!resp.ok) throw new Error('HTTP '+resp.status);
+    fullState = await resp.json();
+
+    // Find the active session matching sessionId or fall back to activeSession
+    session = null;
+    if (sessionId && fullState.sessions) {
+      session = fullState.sessions.find(s => s.id === sessionId);
+    }
+    if (!session && fullState.activeSession) {
+      session = fullState.activeSession;
+    }
+    if (!session) throw new Error('Session not found');
+
+    players = (fullState.players || []).filter(p => p.regular)
+      .sort((a,b) => (a.name||'').localeCompare(b.name));
+    subs    = (fullState.players || []).filter(p => !p.regular)
+      .sort((a,b) => (a.name||'').localeCompare(b.name));
+
+    if (!players.length) throw new Error('No players found');
+  } catch(e) {
+    card.innerHTML = errorHTML(e.message); return;
+  }
+
+  renderForm();
+}
+
+function expiredHTML() {
+  return `<div class="logo">Friday Game</div>
+    <div class="expired">
+      <div class="expired-icon">⏰</div>
+      <div class="expired-title">Link Expired</div>
+      <div class="expired-msg">This RSVP link expired at 5pm on ${fmtDate(dateStr)}.<br>Contact your league manager to update your status.</div>
+    </div>`;
+}
+
+function errorHTML(msg) {
+  return `<div class="logo">Friday Game</div>
+    <div class="expired">
+      <div class="expired-icon">⚠️</div>
+      <div class="expired-title">Unavailable</div>
+      <div class="expired-msg">Could not load session data.<br><small style="color:#aaa">${esc(msg)}</small></div>
+    </div>`;
+}
+
+function renderForm() {
+  const card = document.getElementById('card');
+  const teeTimes = session.teeTimes || ['5:20','5:30','5:40','5:50','6:00'];
+  const ttOpts   = teeTimes.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  const subOpts  = subs.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join('');
+  const playerOpts = players.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+
+  card.innerHTML = `
+    <div class="logo">Friday Game</div>
+    <div class="subtitle">League RSVP · ${fmtDate(dateStr||session.date)}</div>
+    <div class="date-badge">${fmtDate(dateStr||session.date)}</div>
+
+    <label>Your Name</label>
+    <select id="player-select" onchange="onPlayerChange()">
+      <option value="">— Select your name —</option>
+      ${playerOpts}
+    </select>
+
+    <div id="rsvp-section" style="display:none;">
+      <label>Are you playing?</label>
+      <div class="btn-row">
+        <button class="btn btn-in"  id="btn-in"  onclick="selectStatus('in')">✓ I'm In</button>
+        <button class="btn btn-out" id="btn-out" onclick="selectStatus('out')">✗ Can't Make It</button>
+      </div>
+      <div class="status-indicator" id="status-indicator"></div>
+
+      <div id="in-section" style="display:none;">
+        <label>Earliest tee time I can make</label>
+        <select id="earliest-select" onchange="selectedEarliest=this.value" style="margin-bottom:16px;">
+          ${ttOpts}
+        </select>
+      </div>
+
+      <div id="out-section" style="display:none;">
+        <div class="section-box">
+          <div class="section-title">Can someone fill in for you?</div>
+          <label>Sub from roster</label>
+          <select id="sub-select" style="margin-bottom:10px;">
+            <option value="">— No sub needed —</option>
+            ${subOpts}
+          </select>
+          <label>Or bring a guest</label>
+          <input type="text" id="guest-name" placeholder="Guest full name" style="margin-bottom:0;">
+        </div>
+      </div>
+
+      <div class="section-box">
+        <div class="section-title">Your Info</div>
+        <div class="nudge" id="phone-nudge">📱 Add your mobile number so we can send you tee time updates!</div>
+        <label>Mobile Number</label>
+        <input type="tel" id="phone-input" placeholder="(330) 555-0000" inputmode="numeric" oninput="fmtPhoneInput(this)">
+        <div class="nudge" id="ghin-nudge">👋 Add your GHIN # so we can keep your index current!</div>
+        <label>GHIN #</label>
+        <input type="tel" id="ghin-input" placeholder="e.g. 11695577" inputmode="numeric">
+        <label>Current Index</label>
+        <input type="number" id="hcp-input" step="0.1" min="-10" max="54" placeholder="e.g. 14.2" style="margin-bottom:0;">
+      </div>
+
+      <button class="btn-save" id="btn-save" onclick="submitRsvp()">Save My Response</button>
+      <div class="err-msg" id="err-msg"></div>
+    </div>
+    <div class="ver">Friday Game RSVP v${RSVP_VERSION}</div>`;
+}
+
+function fmtPhoneInput(el) {
+  const d = el.value.replace(/\D/g,'').slice(0,10);
+  if (d.length <= 3) el.value = d;
+  else if (d.length <= 6) el.value = '('+d.slice(0,3)+') '+d.slice(3);
+  else el.value = '('+d.slice(0,3)+') '+d.slice(3,6)+'-'+d.slice(6);
+}
+
+function onPlayerChange() {
+  const pid     = document.getElementById('player-select').value;
+  const section = document.getElementById('rsvp-section');
+  if (!pid) { section.style.display='none'; return; }
+  section.style.display = 'block';
+
+  const p = players.find(pl => pl.id === pid);
+  if (p) {
+    document.getElementById('hcp-input').value  = p.hcp != null ? p.hcp : '';
+    document.getElementById('ghin-input').value = p.ghin || '';
+    // Phone — decode and format
+    const phoneDigits = decodePhone(p.phone||'');
+    if (phoneDigits.length === 10) {
+      document.getElementById('phone-input').value =
+        '('+phoneDigits.slice(0,3)+') '+phoneDigits.slice(3,6)+'-'+phoneDigits.slice(6);
+    } else {
+      document.getElementById('phone-input').value = '';
+    }
+    document.getElementById('phone-nudge').style.display = (!p.phone) ? 'block' : 'none';
+    document.getElementById('ghin-nudge').style.display  = (!p.ghin)  ? 'block' : 'none';
+
+    // Pre-fill from existing RSVP response if any
+    const existing = session.rsvp?.players?.[pid];
+    if (existing) {
+      selectStatus(existing.status || 'in');
+      if (existing.earliest) {
+        const el = document.getElementById('earliest-select');
+        if (el) el.value = existing.earliest;
+        selectedEarliest = existing.earliest;
+      }
+      if (existing.subId) {
+        const el = document.getElementById('sub-select');
+        if (el) el.value = existing.subId;
+      }
+      if (existing.guestName) {
+        document.getElementById('guest-name').value = existing.guestName;
+      }
+    } else {
+      selectStatus('in');
+    }
+  }
+}
+
+function selectStatus(status) {
+  selectedStatus = status;
+  const btnIn  = document.getElementById('btn-in');
+  const btnOut = document.getElementById('btn-out');
+  const indic  = document.getElementById('status-indicator');
+  const inSec  = document.getElementById('in-section');
+  const outSec = document.getElementById('out-section');
+
+  btnIn.className  = status === 'in'  ? 'btn selected-in'  : 'btn btn-in';
+  btnOut.className = status === 'out' ? 'btn selected-out' : 'btn btn-out';
+
+  if (inSec)  inSec.style.display  = status === 'in'  ? '' : 'none';
+  if (outSec) outSec.style.display = status === 'out' ? '' : 'none';
+
+  if (indic) {
+    if (status === 'in')  { indic.textContent='✓ Great — see you on the course!'; indic.style.color='#166534'; }
+    if (status === 'out') { indic.textContent='✗ Got it — maybe next time!';      indic.style.color='#b91c1c'; }
+  }
+
+  // Default earliest to first tee time
+  if (status === 'in' && !selectedEarliest) {
+    const el = document.getElementById('earliest-select');
+    if (el) selectedEarliest = el.value;
+  }
+}
+
+async function submitRsvp() {
+  if (isExpired()) { showErr('⏰ This link has expired.'); return; }
+
+  const pid = document.getElementById('player-select').value;
+  if (!pid) { showErr('Please select your name.'); return; }
+  if (!selectedStatus) { showErr('Please select In or Out.'); return; }
+
+  const saveBtn = document.getElementById('btn-save');
+  saveBtn.textContent = 'Saving…';
+  saveBtn.disabled    = true;
+  hideErr();
+
+  try {
+    // Fresh read
+    const fresh = await fetchWT(`${FB_BASE}/state.json`);
+    if (!fresh.ok) throw new Error('Could not read state');
+    const state = await fresh.json();
+
+    // Locate and update session in state
+    let sess = null;
+    if (sessionId && state.sessions) {
+      sess = state.sessions.find(s => s.id === sessionId);
+    }
+    if (!sess && state.activeSession) sess = state.activeSession;
+    if (!sess) throw new Error('Session not found in state');
+
+    if (!sess.rsvp)         sess.rsvp         = { players: {} };
+    if (!sess.rsvp.players) sess.rsvp.players  = {};
+
+    // Build RSVP entry
+    const entry = { status: selectedStatus };
+    if (selectedStatus === 'in') {
+      entry.earliest = selectedEarliest || (sess.teeTimes||[])[0] || null;
+    }
+    if (selectedStatus === 'out') {
+      const subId    = document.getElementById('sub-select').value || null;
+      const guestName = document.getElementById('guest-name').value.trim() || null;
+      if (subId)     entry.subId     = subId;
+      if (guestName) entry.guestName = guestName;
+    }
+    sess.rsvp.players[pid] = entry;
+
+    // Update activeSession if this is it
+    if (state.activeSession && state.activeSession.id === sess.id) {
+      state.activeSession.rsvp = sess.rsvp;
+    }
+
+    // Update player data — phone, GHIN, HCP
+    const p = (state.players||[]).find(pl => pl.id === pid);
+    if (p) {
+      const hcpVal = parseFloat(document.getElementById('hcp-input').value);
+      if (!isNaN(hcpVal)) p.hcp = hcpVal;
+
+      const ghinVal = (document.getElementById('ghin-input').value||'').trim().replace(/\D/g,'');
+      if (ghinVal) p.ghin = ghinVal;
+
+      const phoneRaw = (document.getElementById('phone-input').value||'').replace(/\D/g,'');
+      if (phoneRaw.length === 10) p.phone = btoa(phoneRaw);
+    }
+
+    // Write back
+    const resp = await fetchWT(`${FB_BASE}/state.json`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state)
+    });
+    if (!resp.ok) throw new Error('HTTP '+resp.status);
+
+    // Success screen
+    const card = document.getElementById('card');
+    const name = players.find(pl => pl.id === pid)?.name || 'You';
+    const teeTimes = sess.teeTimes || [];
+    const earliest = entry.earliest;
+    card.innerHTML = `
+      <div class="logo">Friday Game</div>
+      <div class="date-badge">${fmtDate(dateStr||sess.date)}</div>
+      <div class="success">
+        <div class="success-icon">${selectedStatus==='in'?'⛳':'👋'}</div>
+        <div class="success-msg">${selectedStatus==='in'?"You're In!":'Got it!'}</div>
+        <div class="success-sub">
+          ${esc(name)}, your response has been saved.<br>
+          ${selectedStatus==='in' && earliest ? 'Earliest tee time: <strong>'+esc(earliest)+'</strong><br>' : ''}
+          ${selectedStatus==='in' ? 'See you Friday!' : 'Maybe next time — thanks for letting us know!'}
+        </div>
+      </div>
+      <div class="ver">Friday Game RSVP v${RSVP_VERSION}</div>`;
+
+  } catch(e) {
+    saveBtn.textContent = 'Save My Response';
+    saveBtn.disabled = false;
+    showErr('⚠ Could not save: ' + e.message);
+  }
+}
+
+function showErr(msg) {
+  const el = document.getElementById('err-msg');
+  if (el) { el.style.display='block'; el.textContent=msg; }
+}
+function hideErr() {
+  const el = document.getElementById('err-msg');
+  if (el) el.style.display='none';
+}
+
+init();
+</script>
+</body>
+</html>
